@@ -24,7 +24,7 @@ colnames(ag_lib) <- c("Ag.ID", "seq")
 setwd(normalizePath(dir_counts))
 
 # Get a vector containing only the count files from that directory
-count_files <- dir(dir_counts)[grep(dir(dir_counts), pattern = "Ag.*\\.counts")]
+count_files <- dir(dir_counts)[grep(dir(dir_counts), pattern = ".*\\.counts")]
 
 # create dt that will receive all counts from the individual files (column 1 = ag lib ids)
 finalCounts <- ag_lib[,1]

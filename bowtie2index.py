@@ -68,7 +68,7 @@ def main():
                         datefmt='%d-%b-%y %H:%M:%S',
                         level=logging.DEBUG,
                         handlers=[
-                        logging.FileHandler(f'{os.path.dirname(lib)}/bowtie2_indices/indexing_{log}'),
+                        logging.FileHandler(f'{os.path.dirname(lib)}/bowtie2_indices/{log}'),
                         logging.StreamHandler() # these 2 handlers allow 1) to have the log file created and 2) to stream to the terminal
                         ])
 
