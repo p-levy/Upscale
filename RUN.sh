@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# Convert library table to fasta
+./convert_lib_to_fasta.sh /Users/plevy/Library/CloudStorage/OneDrive-VHIO/labagros/pierre/proj/upscale/libraries/360RIO136/360RIO136_Lib_v1.0.tsv \
+	/Users/plevy/Library/CloudStorage/OneDrive-VHIO/labagros/pierre/proj/upscale/libraries/360RIO136/360RIO136_Lib_v1.0.fasta	
+
 # Create Bowtie2 indices
 # Optional, only if not done before for this library
 python3 bowtie2index.py \
