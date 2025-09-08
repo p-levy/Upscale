@@ -15,11 +15,6 @@ import sys
 
 # --------------------------------------------------
 def get_args():
-    parser.add_argument('-K',
-                        '--keepTmp',
-                        help='Keep the tmp subfolder after pipeline finishes',
-                        action='store_true',
-                        default=False)
     """Get command-line arguments"""
 
     parser = argparse.ArgumentParser(
@@ -52,10 +47,15 @@ def get_args():
                         type=str,
                         default='out')
 
-
     parser.add_argument('-k',
                         '--keepSam',
                         help='Keep the SAM file after counts are generated',
+                        action='store_true',
+                        default=False)
+    
+    parser.add_argument('-K',
+                        '--keepTmp',
+                        help='Keep the tmp subfolder after pipeline finishes',
                         action='store_true',
                         default=False)
 
@@ -129,7 +129,8 @@ def main():
     fastp1 = re.sub("\..*", "", os.path.basename(r1)).replace(".*", "")
     fastp2 = re.sub("\..*", "", os.path.basename(r2)).replace(".*", "")
     if not os.path.exists(f'{outtmp}/{fastp1}.r1.fastp.fq'):
-        logger.info("****** Fastp (Docker): umi extraction + dedup + qc ******\n")
+        logger.info(
+            "****** Fastp (Docker): umi extraction + dedup + qc ******\n")
         cmd = f"docker run --rm -v {os.path.dirname(r1)}:/data -v {outtmp}:/outtmp quay.io/biocontainers/fastp:1.0.1--heae3180_0 fastp "
         cmd += f"-i /data/{os.path.basename(r1)} "
         cmd += f"-I /data/{os.path.basename(r2)} "
@@ -169,11 +170,11 @@ def main():
         logger.info(cmd)
         logfile = open(f"{sample}_{log}", "a")
         p = subprocess.Popen(cmd, shell=True, stdout=logfile,
-                            stderr=subprocess.STDOUT, executable='/bin/bash')
+                             stderr=subprocess.STDOUT, executable='/bin/bash')
         output, error = p.communicate()
         if p.returncode != 0:
             for line in output.decode("utf-8").split("\n") if output else "":
-                    logger.error(line.rstrip())
+                logger.error(line.rstrip())
             for line in error.decode("utf-8").split("\n") if error else "":
                 logger.error(line.rstrip())
             sys.exit()
@@ -181,7 +182,8 @@ def main():
     # bowtie2 alignment (Docker version)
     if not os.path.exists(f'{sample}.sam'):
         if os.path.exists(f"{os.path.dirname(lib)}/bowtie2_indices/aglib.1.bt2"):
-            logger.info("****** Bowtie2 (Docker): fastq alignment to library ******\n")
+            logger.info(
+                "****** Bowtie2 (Docker): fastq alignment to library ******\n")
             # Mount outtmp and bowtie2_indices
             cmd = f"docker run --rm -v {outtmp}:/outtmp -v {os.path.dirname(lib)}/bowtie2_indices:/indices quay.io/biocontainers/bowtie2:2.5.4--he96a11b_6 bowtie2 "
             cmd += f"-p {threads} "
@@ -202,7 +204,8 @@ def main():
 
     # Compute counts for each Ag (Docker version)
     if not os.path.exists(f'{sample}.counts.txt'):
-        logger.info("****** Computing counts for each candidate Ag (Docker) ******\n")
+        logger.info(
+            "****** Computing counts for each candidate Ag (Docker) ******\n")
         # Use samtools via Docker, mount current dir
         cmd = f"docker run --rm -v {os.getcwd()}:/data quay.io/biocontainers/samtools:1.22.1--h96c455f_0 samtools view /data/{sample}.sam -F 0x80 "
         cmd += f"| cut -f 3 | sort | uniq -c | awk '{{printf(\"%s\\t%s\\n\", $2, $1)}}' > {sample}.counts.txt"
