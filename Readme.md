@@ -22,7 +22,8 @@ Options: <br>
 `-l --log` name of log file (default: `log.txt`) <br>
 `-o --out` output folder (default: `out`) <br>
 `-t --threads` number of cpus to use, for `cutdadapt` and `bowtie2` steps (default: `4`) <br>
-`-k --keepSam` keep the SAM file after counts are generated (default: False)
+`-k --keepSam` keep the SAM file after counts are generated (default: False) <br>
+`-K --keepTmp` keep the tmp subfolder after pipeline finishes (default: False)
 
 Usage for **multiple sample**: <br>
 ```bash

@@ -15,6 +15,11 @@ import sys
 
 # --------------------------------------------------
 def get_args():
+    parser.add_argument('-K',
+                        '--keepTmp',
+                        help='Keep the tmp subfolder after pipeline finishes',
+                        action='store_true',
+                        default=False)
     """Get command-line arguments"""
 
     parser = argparse.ArgumentParser(
@@ -92,6 +97,7 @@ def main():
     out = args.out
     threads = args.threads
     keep_sam = args.keepSam
+    keep_tmp = args.keepTmp
 
     # Sample name
     sample = re.sub("_1\.f.*q*", "", os.path.basename(r1))
@@ -208,6 +214,14 @@ def main():
                 logger.info(f"Removed {sample}.sam")
             except Exception as e:
                 logger.error(f"Error removing {sample}.sam: {e}")
+        # Remove the tmp subfolder unless keep_tmp is True
+        if not keep_tmp and os.path.exists(outtmp):
+            try:
+                import shutil
+                shutil.rmtree(outtmp)
+                logger.info(f"Removed tmp subfolder: {outtmp}")
+            except Exception as e:
+                logger.error(f"Error removing tmp subfolder {outtmp}: {e}")
 
 
 # --------------------------------------------------
