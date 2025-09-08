@@ -50,5 +50,9 @@ $ cat samples.read2.txt
 ## Join counts
 
 Make one single count table for all samples
-Usage: `./join_counts.R out library.tsv`
-where `out` is the output directory containing the count files for each sample ending with `.count` and `library.tsv` contains the Ag unique IDs in column 1.
+You can use either the R or Python version:
+
+- R: `./join_counts.R out library.tsv`
+- Python: `./join_counts.py out library.tsv`
+
+Where `out` is the output directory containing the count files for each sample ending with `.counts` or `.counts.txt`, and `library.tsv` contains the Ag unique IDs in column 1.
