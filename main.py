@@ -47,6 +47,13 @@ def get_args():
                         type=str,
                         default='out')
 
+
+    parser.add_argument('-k',
+                        '--keepSam',
+                        help='Keep the SAM file after counts are generated',
+                        action='store_true',
+                        default=False)
+
     parser.add_argument('-t',
                         '--threads',
                         help='Number of threads for certain steps',
@@ -84,6 +91,7 @@ def main():
     log = args.log
     out = args.out
     threads = args.threads
+    keep_sam = args.keepSam
 
     # Sample name
     sample = re.sub("_1\.f.*q*", "", os.path.basename(r1))
@@ -193,6 +201,13 @@ def main():
         cmd = f"docker run --rm -v {os.getcwd()}:/data quay.io/biocontainers/samtools:1.22.1--h96c455f_0 samtools view /data/{sample}.sam -F 0x80 "
         cmd += f"| cut -f 3 | sort | uniq -c | awk '{{printf(\"%s\\t%s\\n\", $2, $1)}}' > {sample}.counts.txt"
         exec_command(cmd)
+        # Remove the .sam file unless keep_sam is True
+        if not keep_sam and os.path.exists(f'{sample}.sam'):
+            try:
+                os.remove(f'{sample}.sam')
+                logger.info(f"Removed {sample}.sam")
+            except Exception as e:
+                logger.error(f"Error removing {sample}.sam: {e}")
 
 
 # --------------------------------------------------
