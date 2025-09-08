@@ -177,7 +177,7 @@ def main():
             cmd += "--no-unal "
             cmd += "--dovetail "
             cmd += "-x /indices/aglib "
-            cmd += f"> /outtmp/{sample}.sam 2>> /outtmp/{sample}_{log}"
+            cmd += f"> {outtmp}/{sample}.sam 2>> {outtmp}/{sample}_{log}"
             exec_command(cmd)
             # Move .sam file to current directory
             if os.path.exists(f"{outtmp}/{sample}.sam"):
