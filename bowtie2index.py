@@ -74,10 +74,11 @@ def main():
 
     logger = logging.getLogger() # creates logger to add entries to the log
 
-    # bowtie2 indexing (if not done before)
+    # bowtie2 indexing (Docker version, if not done before)
     if not os.path.exists(f"{os.path.dirname(lib)}/bowtie2_indices/aglib.1.bt2"):
-        logger.info("****** Bowtie2: library fasta indexing ******\n\n")
-        cmd = f"bowtie2-build {lib} {os.path.dirname(lib)}/bowtie2_indices/aglib"
+        logger.info("****** Bowtie2 (Docker): library fasta indexing ******\n\n")
+        # Mount the lib directory and bowtie2_indices for output
+        cmd = f"docker run --rm -v {os.path.dirname(lib)}:/data -v {os.path.dirname(lib)}/bowtie2_indices:/indices quay.io/biocontainers/bowtie2:2.5.4--he96a11b_6 bowtie2-build /data/{os.path.basename(lib)} /indices/aglib"
         exec_command(cmd)
 
 

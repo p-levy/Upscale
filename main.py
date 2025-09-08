@@ -54,25 +54,6 @@ def get_args():
                         type=str,
                         default='4')
 
-    # parser.add_argument('-i',
-    #                     '--int',
-    #                     help='A named integer argument',
-    #                     metavar='\b',
-    #                     type=int,
-    #                     default=0)
-
-    # parser.add_argument('-f',
-    #                     '--file',
-    #                     help='A readable file',
-    #                     metavar='\b',
-    #                     type=argparse.FileType('rt'),
-    #                     default=None)
-
-    # parser.add_argument('-t',
-    #                     '--true',
-    #                     help='A boolean flag',
-    #                     action='store_true')
-
     return parser.parse_args()
 
 # --------------------------------------------------
@@ -130,32 +111,25 @@ def main():
 
     logger = logging.getLogger()  # creates logger to add entries to the log
 
-    # fastp: fast all-in-one preprocessing for FastQ files (https://github.com/OpenGene/fastp)
-    # adapter trimming is disabled (--disable_adapter_trimming) because it doesn't work here
+    # fastp: fast all-in-one preprocessing for FastQ files (Docker version)
     fastp1 = re.sub("\..*", "", os.path.basename(r1)).replace(".*", "")
     fastp2 = re.sub("\..*", "", os.path.basename(r2)).replace(".*", "")
     if not os.path.exists(f'{outtmp}/{fastp1}.r1.fastp.fq'):
-        logger.info("****** Fastp: umi extraction + dedup + qc ******\n")
-        cmd = "fastp -i {r1} \
-            -I {r2} \
-            -o {outtmp}/{output1}.r1.fastp.fq \
-            -O {outtmp}/{output2}.r2.fastp.fq \
-            --disable_adapter_trimming \
-            --length_required 100 \
-            --umi \
-            --umi_len 16 \
-            --umi_loc read2 \
-            --umi_prefix UMI \
-            --dedup \
-            -h {html} \
-            -j {json}".format(
-            r1=r1,
-            r2=r2,
-            outtmp=outtmp,
-            output1=fastp1,
-            output2=fastp2,
-            html=f'{sample}.fastp.html',
-            json=f'{sample}.fastp.json')  # minimum read length and dedup options
+        logger.info("****** Fastp (Docker): umi extraction + dedup + qc ******\n")
+        cmd = f"docker run --rm -v {os.path.dirname(r1)}:/data -v {outtmp}:/outtmp quay.io/biocontainers/fastp:1.0.1--heae3180_0 fastp "
+        cmd += f"-i /data/{os.path.basename(r1)} "
+        cmd += f"-I /data/{os.path.basename(r2)} "
+        cmd += f"-o /outtmp/{fastp1}.r1.fastp.fq "
+        cmd += f"-O /outtmp/{fastp2}.r2.fastp.fq "
+        cmd += "--disable_adapter_trimming "
+        cmd += "--length_required 100 "
+        cmd += "--umi "
+        cmd += "--umi_len 16 "
+        cmd += "--umi_loc read2 "
+        cmd += "--umi_prefix UMI "
+        cmd += "--dedup "
+        cmd += f"-h /outtmp/{sample}.fastp.html "
+        cmd += f"-j /outtmp/{sample}.fastp.json"
         exec_command(cmd)
 
     # Cutadapt: trimming of shared sequences in 5' of each reads
@@ -166,7 +140,7 @@ def main():
             "****** Cutadapt: trimming of shared sequences in 5' of each read ******\n")
         cmd = f"docker run --rm \
                 -v {outtmp}:/outtmp \
-                quay.io/biocontainers/cutadapt:4.9--py39hff71179_1 \
+                quay.io/biocontainers/cutadapt:5.1--py310h1fe012e_0 \
                 cutadapt \
                 -g CGCTCAGCCTCGAGGTTT \
                 -G GCTGCGGAATTCGCGTTT \
@@ -190,36 +164,34 @@ def main():
                 logger.error(line.rstrip())
             sys.exit()
 
-    # bowtie2 alignment
+    # bowtie2 alignment (Docker version)
     if not os.path.exists(f'{sample}.sam'):
         if os.path.exists(f"{os.path.dirname(lib)}/bowtie2_indices/aglib.1.bt2"):
-            logger.info("****** Bowtie2: fastq alignment to library ******\n")
-            cmd = f"bowtie2 \
-                    -p {threads} \
-                    -N 0 \
-                    --no-1mm-upfront \
-                    -q -1 {outtmp}/{sample}.out.1.fastq \
-                    -2 {outtmp}/{sample}.out.2.fastq \
-                    --no-unal \
-                    -x {os.path.dirname(lib)}/bowtie2_indices/aglib \
-                    --dovetail \
-                    > {sample}.sam \
-                    2> >(tee -a {sample}_{log} >&2)"
-                    # --dovetail mates  extending "past" each other consider concordant by bowtie2
+            logger.info("****** Bowtie2 (Docker): fastq alignment to library ******\n")
+            # Mount outtmp and bowtie2_indices
+            cmd = f"docker run --rm -v {outtmp}:/outtmp -v {os.path.dirname(lib)}/bowtie2_indices:/indices quay.io/biocontainers/bowtie2:2.5.4--he96a11b_6 bowtie2 "
+            cmd += f"-p {threads} "
+            cmd += "-N 0 "
+            cmd += "--no-1mm-upfront "
+            cmd += f"-q -1 /outtmp/{sample}.out.1.fastq -2 /outtmp/{sample}.out.2.fastq "
+            cmd += "--no-unal "
+            cmd += "--dovetail "
+            cmd += "-x /indices/aglib "
+            cmd += f"> /outtmp/{sample}.sam 2>> /outtmp/{sample}_{log}"
             exec_command(cmd)
+            # Move .sam file to current directory
+            if os.path.exists(f"{outtmp}/{sample}.sam"):
+                os.rename(f"{outtmp}/{sample}.sam", f"{sample}.sam")
         else:
             print("Bowtie2 indices not found –> Run bowtie2indices.py first")
             sys.exit()
 
-    # Compute counts for each Ag
+    # Compute counts for each Ag (Docker version)
     if not os.path.exists(f'{sample}.counts.txt'):
-        logger.info("****** Computing counts for each candidate Ag ******\n")
-        # -F 0x80 removes read2 so that we only have one line per read, for the count.
-        cmd = f"samtools view {sample}.sam -F 0x80 | \
-            cut -f 3 | \
-            sort | \
-            uniq -c | \
-            awk '{{printf(\"%s\\t%s\\n\", $2, $1)}}' > {sample}.counts.txt"
+        logger.info("****** Computing counts for each candidate Ag (Docker) ******\n")
+        # Use samtools via Docker, mount current dir
+        cmd = f"docker run --rm -v {os.getcwd()}:/data quay.io/biocontainers/samtools:1.22.1--h96c455f_0 samtools view /data/{sample}.sam -F 0x80 "
+        cmd += f"| cut -f 3 | sort | uniq -c | awk '{{printf(\"%s\\t%s\\n\", $2, $1)}}' > {sample}.counts.txt"
         exec_command(cmd)
 
 
