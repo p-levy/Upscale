@@ -1,0 +1,444 @@
+---
+title: 'Positive control Upscale screen: GEMIN5'
+author: 'Pierre Levy'
+format:
+  html:
+    code-fold: true
+    toc: true
+    toc-depth: 2
+    embed-resources: true
+engine: knitr
+execute:
+  echo: false
+  message: false
+  warning: false
+date: '`r Sys.Date()`'
+---
+
+```{r setup, include=FALSE}
+suppressPackageStartupMessages(library(edgeR))
+suppressPackageStartupMessages(library(data.table))
+suppressPackageStartupMessages(library(tidyverse))
+suppressPackageStartupMessages(library(ggrepel))
+suppressPackageStartupMessages(library(ggbeeswarm))
+library(conflicted)
+conflict_prefer('filter', 'dplyr')
+conflict_prefer('select', 'dplyr')
+# Set as wd the current directory of this qmd file
+```
+```{r, eval=FALSE}
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+```
+
+```{r}
+#| label: screening_conditions
+conditions <- data.frame(
+  Sample = c("Bulk", "GTLneg_GEMIN5", "GTLneg_Private", "GTLpos_GEMIN5", "GTLpos_Private"),
+  Condition = c("Bulk_Lib_Bcell", "GEMIN5_TCRTd_1to10", "RIO136_private_TCRs_1to8", "GEMIN5_TCRTd_1to10", "RIO136_private_TCRs_1to8"),
+    GTL = c("Bulk", rep("Neg", 2), rep("Pos", 2))
+)
+
+knitr::kable(conditions, caption = "Screening conditions for the Upscale screen")
+```
+
+# Settings for dispersion and logFC thresholds
+See code below.
+```{r}
+#| label: disperion and logfc_settings
+#| echo: true
+dispersion_value <- 0.4 # arbitrary dispersion because of absence of replicates
+logfc_threshold <- 1 # log2 fold change threshold
+min_cpm <- 30 # minimum counts per million
+min_samples <- 1 # in at least x samples
+pvalue_threshold <- 0.05 # p-value threshold
+
+```
+
+# Load all counts
+```{r}
+#| label: load_all_counts
+all_counts <- fread("/Users/plevy/Library/CloudStorage/OneDrive-VHIO/labagros/pierre/proj/upscale/screens/RIO136/shared_lib/out/all.counts.txt")
+# rename columns
+colnames(all_counts) <- gsub("_MKDL.*", "", colnames(all_counts))
+
+DT::datatable(all_counts, 
+			  options = list(pageLength = 10, scrollX = TRUE),
+			  caption = 'All counts for all samples from all.counts.txt') %>%
+  DT::formatSignif(columns = 2:11, digits = 3)
+
+# Count density plot per sample
+all_counts_long <- all_counts %>%
+  pivot_longer(cols = -Ag.ID, names_to = "Sample", values_to = "Counts")
+p <- ggplot(all_counts_long, aes(x = Counts + 1)) +
+  geom_density(aes(color = Sample)) +
+  scale_x_log10() +
+  ggtitle("Count density plot per sample (log10 scale)") +
+  xlab("Counts (log10 scale)") +
+  ylab("Density")
+p
+ggsave("Count_density_all_samples.pdf", plot = p, width = 8, height = 6)
+
+# Stats on all counts (total counts per sample, scientific notation)
+all_counts_stats <- data.frame(
+  Sample = colnames(all_counts)[-1],
+  Total_Counts = colSums(all_counts[, -1])
+) %>% left_join(conditions, by = "Sample")
+
+DT::datatable(all_counts_stats, options = list(pageLength = 10), 
+              caption = 'Total counts per sample in all_counts.txt') %>%
+  DT::formatStyle(
+    'Total_Counts',
+    background = DT::styleColorBar(c(0,all_counts_stats$Total_Counts), 'lightblue'),
+    backgroundSize = '100% 90%',
+    backgroundRepeat = 'no-repeat',
+    backgroundPosition = 'center'
+  ) %>%
+  DT::formatSignif('Total_Counts', digits = 3)
+
+```
+
+# Normalized counts (CPM) for all samples
+```{r}
+#| label: all_normalized_counts
+# Create DGEList for all samples
+y_all <- DGEList(counts = all_counts[, -1], genes = all_counts[, 1])
+
+# Calculate CPM-normalized counts
+normalized_counts_all <- cpm(y_all)
+
+# Create data frame with Ag.ID and normalized counts
+normalized_counts_df_all <- data.frame(
+  Ag.ID = all_counts$Ag.ID,
+  normalized_counts_all
+) %>% as_tibble()
+
+DT::datatable(normalized_counts_df_all, 
+              options = list(pageLength = 25, scrollX = TRUE),
+              caption = 'CPM-normalized counts for all samples') %>%
+  DT::formatSignif(columns = 2:11, digits = 3)
+
+# Normalized count density plot per sample
+normalized_counts_df_all_long <- normalized_counts_df_all %>%
+  pivot_longer(cols = -Ag.ID, names_to = "Sample", values_to = "Counts")
+p <- ggplot(normalized_counts_df_all_long, aes(x = Counts + 1)) +
+  geom_density(aes(color = Sample)) +
+  scale_x_log10() +
+  ggtitle("CPM density plot per sample (log10 scale)") +
+  xlab("CPM (log10 scale)") +
+  ylab("Density")
+p
+ggsave("Normalized_count_density_all_samples.pdf", plot = p, width = 8, height = 6)
+```
+
+# GEMIN5 screen
+## GTL+ Top vs GTL- Bottom
+```{r}
+counts <- all_counts %>% select(`Ag.ID`, GTLneg_GEMIN5, GTLpos_GEMIN5)
+group <- c("GTLneg", "GTLpos")
+```
+
+```{r}
+# Create DGEList object with counts, samples, genes and group info
+y <- DGEList(counts = counts[, -1], genes = counts[, 1], group = group)
+
+# Filter out low counts
+selr <- rowSums(cpm(y$counts) > min_cpm) >= min_samples # minimum 10 cpm in 1 sample
+selc <- colSums(y$counts) >= 1000000 # minimum total number of reads per sample
+y <- y[selr, selc]
+```
+
+```{r}
+# Exact test: comparison of two groups
+et <- exactTest(y, pair = c("GTLneg", "GTLpos"), dispersion = dispersion_value^2) # arbitrary dispersion because of no replicate here
+
+et_table <- data.table(et[["genes"]], et[["table"]])
+
+DT::datatable(et_table, options = list(pageLength = 10), 
+			  caption = 'Exact test results for GEMIN5 T cells control only') %>%
+  DT::formatSignif(columns = c("logFC", "logCPM", "PValue"), digits = 3)
+```
+
+```{r}
+# Filter hits with the 2 Ags with significant p-value (<0.01) and lfc > 1
+
+et_table2 <- et_table %>% mutate(Ag = gsub("\\.[ab]$", "", Ag.ID))
+
+pos <- et_table2 %>% filter(logFC > logfc_threshold & PValue < pvalue_threshold)
+
+summary_pos <- pos %>%
+    group_by(Ag) %>%
+    summarise("n" = n())
+
+pos_hits <- summary_pos %>%
+    filter(n == 2) %>%
+    pull(Ag)
+
+all_pos_hits <- c()
+all_pos_hits <- unique(c(all_pos_hits, pos_hits))
+```
+
+```{r}
+#| label: plot_gemin5
+# Plot
+p <- ggplot(et_table2, aes(x = logCPM, y = logFC)) +
+    geom_point(alpha = 0.1, size = 2) +
+    geom_point(data = et_table2 %>% filter(Ag %in% pos_hits), aes(x = logCPM, y = logFC, color = Ag), size = 3) +
+    geom_text_repel(et_table2 %>% mutate(Ag.ID = ifelse(Ag %in% c("CDKN2Ap.G74fs", "GEMIN5p.S1360L"), Ag.ID, "")), mapping = aes(x = logCPM, y = logFC, label = gsub("p.*", "", `Ag.ID`)), min.segment.length = 0, max.overlaps = Inf) +
+    ggtitle("Positive control")
+p
+
+ggsave("MA_GEMIN5.pdf", plot = p, width = 8, height = 6)
+```
+
+## GTL+ Top vs Bulk
+```{r}
+counts <- all_counts %>% select(`Ag.ID`, Bulk, GTLpos_GEMIN5)
+group <- c("Bulk", "GTLpos")
+```
+
+```{r}
+# Create DGEList object with counts, samples, genes and group info
+y <- DGEList(counts = counts[, -1], genes = counts[, 1], group = group)
+
+# Filter out low counts
+selr <- rowSums(cpm(y$counts) > min_cpm) >= min_samples # minimum 10 cpm in 1 sample
+selc <- colSums(y$counts) >= 1000000 # minimum total number of reads per sample
+y <- y[selr, selc]
+```
+
+```{r}
+# Exact test: comparison of two groups
+et <- exactTest(y, pair = c("Bulk", "GTLpos"), dispersion = dispersion_value^2) # arbitrary dispersion because of no replicate here
+
+et_table <- data.table(et[["genes"]], et[["table"]])
+
+DT::datatable(et_table, options = list(pageLength = 10), 
+			  caption = 'Exact test results for GEMIN5 T cells control only') %>%
+  DT::formatSignif(columns = c("logFC", "logCPM", "PValue"), digits = 3)
+```
+
+```{r}
+# Filter hits with the 2 Ags with significant p-value (<0.01) and lfc > 1
+
+et_table2 <- et_table %>% mutate(Ag = gsub("\\.[ab]$", "", Ag.ID))
+
+pos <- et_table2 %>% filter(logFC > logfc_threshold & PValue < pvalue_threshold)
+
+summary_pos <- pos %>%
+    group_by(Ag) %>%
+    summarise("n" = n())
+
+pos_hits <- summary_pos %>%
+    filter(n == 2) %>%
+    pull(Ag)
+
+all_pos_hits <- c()
+all_pos_hits <- unique(c(all_pos_hits, pos_hits))
+```
+
+```{r}
+#| label: plot_gemin5_vs_bulk
+# Plot
+p <- ggplot(et_table2, aes(x = logCPM, y = logFC)) +
+    geom_point(alpha = 0.1, size = 2) +
+    geom_point(data = et_table2 %>% filter(Ag %in% pos_hits), aes(x = logCPM, y = logFC, color = Ag), size = 3) +
+    geom_text_repel(et_table2 %>% mutate(Ag.ID = ifelse(Ag %in% c("CDKN2Ap.G74fs", "GEMIN5p.S1360L"), Ag.ID, "")), mapping = aes(x = logCPM, y = logFC, label = gsub("p.*", "", `Ag.ID`)), min.segment.length = 0, max.overlaps = Inf) +
+    ggtitle("Positive control")
+p
+
+ggsave("MA_GEMIN5_vs_Bulk.pdf", plot = p, width = 8, height = 6)
+```
+
+# RIO136 Private TCRs
+## GTL+ Top vs GTL- Bottom
+```{r}
+counts <- all_counts %>% select(`Ag.ID`, GTLneg_Private, GTLpos_Private)
+group <- c("GTLneg", "GTLpos")
+```
+
+```{r}
+# Create DGEList object with counts, samples, genes and group info
+y <- DGEList(counts = counts[, -1], genes = counts[, 1], group = group)
+
+# Filter out low counts
+selr <- rowSums(cpm(y$counts) > min_cpm) >= min_samples # minimum 10 cpm in 1 sample
+selc <- colSums(y$counts) >= 1000000 # minimum total number of reads per sample
+y <- y[selr, selc]
+```
+
+```{r}
+# Exact test: comparison of two groups
+et <- exactTest(y, pair = c("GTLneg", "GTLpos"), dispersion = dispersion_value^2) # arbitrary dispersion because of no replicate here
+
+et_table <- data.table(et[["genes"]], et[["table"]])
+
+DT::datatable(et_table, options = list(pageLength = 10), 
+			  caption = 'Exact test results for RIO136 Private TCRs') %>%
+  DT::formatSignif(columns = c("logFC", "logCPM", "PValue"), digits = 3)
+
+```
+
+```{r}
+# Filter hits with the 2 Ags with significant p-value (<0.01) and lfc > 1
+
+et_table2 <- et_table %>% mutate(Ag = gsub("\\.[ab]$", "", Ag.ID))
+
+pos <- et_table2 %>% filter(logFC > logfc_threshold & PValue < pvalue_threshold)
+
+summary_pos <- pos %>%
+    group_by(Ag) %>%
+    summarise("n" = n())
+
+pos_hits <- summary_pos %>%
+    filter(n == 2) %>%
+    pull(Ag)
+
+all_pos_hits <- c()
+all_pos_hits <- unique(c(all_pos_hits, pos_hits))
+```
+
+```{r}
+#| label: plot_rio136_private
+# Plot
+p <- ggplot(et_table2, aes(x = logCPM, y = logFC)) +
+    geom_point(alpha = 0.1, size = 2) +
+    geom_point(data = et_table2 %>% filter(Ag %in% pos_hits), aes(x = logCPM, y = logFC, color = Ag), size = 3) +
+    geom_text_repel(et_table2 %>% mutate(Ag.ID = ifelse(Ag %in% c("CDKN2Ap.G74fs", "GEMIN5p.S1360L"), Ag.ID, "")), mapping = aes(x = logCPM, y = logFC, label = gsub("p.*", "", `Ag.ID`)), min.segment.length = 0, max.overlaps = Inf) +
+    ggtitle("RIO136 Private TCRs")
+p
+
+ggsave("MA_RIO136_Private_TCRs.pdf", plot = p, width = 8, height = 6)
+```
+
+## GTL+ Top vs Bulk
+```{r}
+counts <- all_counts %>% select(`Ag.ID`, Bulk, GTLpos_Private)
+group <- c("Bulk", "GTLpos")
+```
+
+```{r}
+# Create DGEList object with counts, samples, genes and group info
+y <- DGEList(counts = counts[, -1], genes = counts[, 1], group = group)
+
+# Filter out low counts
+selr <- rowSums(cpm(y$counts) > min_cpm) >= min_samples # minimum 10 cpm in 1 sample
+selc <- colSums(y$counts) >= 1000000 # minimum total number of reads per sample
+y <- y[selr, selc]
+```
+
+```{r}
+# Exact test: comparison of two groups
+et <- exactTest(y, pair = c("Bulk", "GTLpos"), dispersion = dispersion_value^2) # arbitrary dispersion because of no replicate here
+
+et_table <- data.table(et[["genes"]], et[["table"]])
+
+DT::datatable(et_table, options = list(pageLength = 10), 
+			  caption = 'Exact test results for RIO136 Private TCRs') %>%
+  DT::formatSignif(columns = c("logFC", "logCPM", "PValue"), digits = 3)
+
+```
+
+```{r}
+# Filter hits with the 2 Ags with significant p-value (<0.01) and lfc > 1
+
+et_table2 <- et_table %>% mutate(Ag = gsub("\\.[ab]$", "", Ag.ID))
+
+pos <- et_table2 %>% filter(logFC > logfc_threshold & PValue < pvalue_threshold)
+
+summary_pos <- pos %>%
+    group_by(Ag) %>%
+    summarise("n" = n())
+
+pos_hits <- summary_pos %>%
+    filter(n == 2) %>%
+    pull(Ag)
+
+all_pos_hits <- c()
+all_pos_hits <- unique(c(all_pos_hits, pos_hits))
+```
+
+```{r}
+#| label: plot_rio136_private_vs_bulk
+# Plot
+p <- ggplot(et_table2, aes(x = logCPM, y = logFC)) +
+    geom_point(alpha = 0.1, size = 2) +
+    geom_point(data = et_table2 %>% filter(Ag %in% pos_hits), aes(x = logCPM, y = logFC, color = Ag), size = 3) +
+    geom_text_repel(et_table2 %>% mutate(Ag.ID = ifelse(Ag %in% c("CDKN2Ap.G74fs", "GEMIN5p.S1360L"), Ag.ID, "")), mapping = aes(x = logCPM, y = logFC, label = gsub("p.*", "", `Ag.ID`)), min.segment.length = 0, max.overlaps = Inf) +
+    ggtitle("RIO136 Private TCRs")
+p
+
+ggsave("MA_RIO136_Private_TCRs_vs_Bulk.pdf", plot = p, width = 8, height = 6)
+```
+
+# GTL+ positive control only vs GTL+ RIO136 T cells
+```{r}
+counts <- all_counts %>% select(`Ag.ID`, GTLpos_GEMIN5, GTLpos_Private)
+group <- c("GEMIN5", "RIO136")
+```
+
+```{r}
+# Create DGEList object with counts, samples, genes and group info
+y <- DGEList(counts = counts[, -1], genes = counts[, 1], group = group)
+
+# Filter out low counts
+selr <- rowSums(cpm(y$counts) > min_cpm) >= min_samples # minimum 10 cpm in 1 sample
+selc <- colSums(y$counts) >= 1000000 # minimum total number of reads per sample
+y <- y[selr, selc]
+```
+
+```{r}
+# Exact test: comparison of two groups
+et <- exactTest(y, pair = c("GEMIN5", "RIO136"), dispersion = dispersion_value^2) # arbitrary dispersion because of no replicate here
+
+et_table <- data.table(et[["genes"]], et[["table"]])
+
+DT::datatable(et_table, options = list(pageLength = 10), 
+			  caption = 'Exact test results for GTL+ positive control only vs GTL+ RIO136 T cells') %>%
+  DT::formatSignif(columns = c("logFC", "logCPM", "PValue"), digits = 3)
+```
+
+```{r}
+# Filter hits with the 2 Ags with significant p-value (<0.01) and lfc > 1
+
+et_table2 <- et_table %>% mutate(Ag = gsub("\\.[ab]$", "", Ag.ID))
+
+pos <- et_table2 %>% filter(logFC > logfc_threshold & PValue < pvalue_threshold)
+
+summary_pos <- pos %>%
+    group_by(Ag) %>%
+    summarise("n" = n())
+
+pos_hits <- summary_pos %>%
+    filter(n == 2) %>%
+    pull(Ag)
+
+all_pos_hits <- c()
+all_pos_hits <- unique(c(all_pos_hits, pos_hits))
+```
+
+```{r}
+#| label: ma_positive_control_only_vs_rio136
+# Plot
+p <- ggplot(et_table2, aes(x = logCPM, y = logFC)) +
+    geom_point(alpha = 0.1, size = 2) +
+    geom_point(data = et_table2 %>% filter(Ag %in% pos_hits), aes(x = logCPM, y = logFC, color = Ag), size = 3) +
+    geom_text_repel(et_table2 %>% mutate(Ag.ID = ifelse(Ag %in% c("CDKN2Ap.G74fs", "GEMIN5p.S1360L"), Ag.ID, "")), mapping = aes(x = logCPM, y = logFC, label = gsub("p.*", "", `Ag.ID`)), min.segment.length = 0, max.overlaps = Inf) +
+    ggtitle("Positive control only vs RIO136 (GTL+)")
+p
+
+ggsave("MA_GTL+GEMIN5_vs_GTL+RIO136.pdf", plot = p, width = 8, height = 6)
+```
+
+```{r}
+#| label: volcano_positive_controls
+# Plot
+p <- ggplot(et_table2, aes(x = logFC, y = -log10(PValue))) +
+    geom_point(alpha = 0.1, size = 2) +
+    geom_point(data = et_table2 %>% filter(Ag %in% pos_hits), aes(x = logFC, y = -log10(PValue), color = Ag), size = 3) +
+    geom_text_repel(et_table2 %>% mutate(Ag.ID = ifelse(Ag %in% c("CDKN2Ap.G74fs", "GEMIN5p.S1360L"), Ag.ID, "")), mapping = aes(x = logFC, y = -log10(PValue), label = gsub("p.*", "", `Ag.ID`)), min.segment.length = 0, max.overlaps = Inf) +
+    ggtitle("Positive control only vs RIO136 (GTL+)")
+p
+
+ggsave("Volcano_GTL+GEMIN5_vs_GTL+RIO136.pdf", plot = p, width = 8, height = 6)
+```
+
