@@ -198,6 +198,15 @@ def main():
             # Move .sam file to current directory
             if os.path.exists(f"{outtmp}/{sample}.sam"):
                 os.rename(f"{outtmp}/{sample}.sam", f"{sample}.sam")
+            # Remove trimmed fastqs immediately after alignment (no longer needed)
+            if not keep_tmp:
+                for fq in [f'{outtmp}/{sample}.out.1.fastq', f'{outtmp}/{sample}.out.2.fastq']:
+                    if os.path.exists(fq):
+                        try:
+                            os.remove(fq)
+                            logger.info(f"Removed {fq}")
+                        except Exception as e:
+                            logger.error(f"Error removing {fq}: {e}")
         else:
             print("Bowtie2 indices not found –> Run bowtie2indices.py first")
             sys.exit()
@@ -217,14 +226,14 @@ def main():
                 logger.info(f"Removed {sample}.sam")
             except Exception as e:
                 logger.error(f"Error removing {sample}.sam: {e}")
-        # Remove the tmp subfolder unless keep_tmp is True
-        if not keep_tmp and os.path.exists(outtmp):
-            try:
-                import shutil
-                shutil.rmtree(outtmp)
-                logger.info(f"Removed tmp subfolder: {outtmp}")
-            except Exception as e:
-                logger.error(f"Error removing tmp subfolder {outtmp}: {e}")
+        # # Remove the tmp subfolder unless keep_tmp is True                **** TO DO: check if should be removed, to keep fastp and bowtie2 logs ****
+        # if not keep_tmp and os.path.exists(outtmp):
+        #     try:
+        #         import shutil
+        #         shutil.rmtree(outtmp)
+        #         logger.info(f"Removed tmp subfolder: {outtmp}")
+        #     except Exception as e:
+        #         logger.error(f"Error removing tmp subfolder {outtmp}: {e}")
 
 
 # --------------------------------------------------
